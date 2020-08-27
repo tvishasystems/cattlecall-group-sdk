@@ -138,7 +138,7 @@ class CattleCall {
         for (let track of localVideoStream.getVideoTracks() ){
             track.enabled = !track.enabled ;
         }
-        let data={"status":videoStatus,'share_user_id' : videoCallUserId};
+        let data={"status":videoStatus,'share_user_id' : active_meeting_id};
         socket.emit("video_toogle",data);
     }
     toggleAudio(){
@@ -147,7 +147,7 @@ class CattleCall {
         for (let track of localVideoStream.getAudioTracks() ){
             track.enabled = !track.enabled ;
         }
-        let data={"status":audioStatus,'share_user_id' : videoCallUserId};
+        let data={"status":audioStatus,'share_user_id' : active_meeting_id};
         socket.emit("audio_toogle",data);
     }
     muteParticipant(participentId){
