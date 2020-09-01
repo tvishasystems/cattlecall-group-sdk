@@ -1,6 +1,6 @@
 {
   "name": "cattlecall-conference-sdk",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "cattle call group video call or conference sdk",
   "main": "index.js",
   "scripts": {
@@ -21,6 +21,6 @@
     "hark": "^1.2.3",
     "socket.io-client": "^2.3.0",
     "trim": "0.0.1",
-    "webrtc-adapter": "^7.6.2"
+    "webrtc-adapter": "^7.7.0"
   }
 }

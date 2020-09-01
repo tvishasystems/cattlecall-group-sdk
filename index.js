@@ -130,7 +130,7 @@ class CattleCall extends Emitter{
         for (let track of $this.localVideoStream.getVideoTracks() ){
             track.enabled = !track.enabled ;
         }
-        updateConfrenceSteam("video");
+        //updateConfrenceSteam("video");
         let data={"status":$this.videoStatus,'participant_id' : $this.videoLoginUserId,"meeting_id":$this.active_meeting_id};
         $this.socket.emit("video_change",data);
     }
@@ -141,7 +141,7 @@ class CattleCall extends Emitter{
         for (let track of $this.localVideoStream.getAudioTracks() ){
             track.enabled = !track.enabled ;
         }
-        updateConfrenceSteam("audio");
+        //updateConfrenceSteam("audio");
         let data={"status":$this.audioStatus,'participant_id' : $this.videoLoginUserId,"meeting_id":$this.active_meeting_id};
         $this.socket.emit("audio_change",data);
     }
@@ -410,6 +410,7 @@ function initVideoConferenceWebRtc(id,toId,negotiate){
         }
     };
     rtcPeerConn[id].ontrack = function (evt) {
+        console.log(evt.streams,"logfromsdk");
         setConferenceVideo(evt.streams[0],id);
     };
     if($this.localVideoStream){
