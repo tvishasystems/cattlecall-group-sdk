@@ -1,10 +1,11 @@
 {
   "name": "Cattle-call-confrence-SDK",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "cattle call group video call or confrence sdk",
   "main": "index.js",
   "scripts": {
-    "test": "npm test"
+    "test": "npm test",
+    "build:vendor": "browserify index.js -d  > cattlecall-group-sdk.min.js"
   },
   "keywords": [
     "video call",
@@ -16,6 +17,7 @@
   "author": "Tvisha Technlogies Pvt Ltd <sai@tvisha.in>",
   "license": "ISC",
   "dependencies": {
+    "hark": "^1.2.3",
     "socket.io-client": "^2.3.0",
     "trim": "0.0.1",
     "webrtc-adapter": "^7.6.2"

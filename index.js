@@ -138,8 +138,9 @@ class CattleCall {
         for (let track of localVideoStream.getVideoTracks() ){
             track.enabled = !track.enabled ;
         }
-        let data={"status":videoStatus,'share_user_id' : active_meeting_id};
-        socket.emit("video_toogle",data);
+        updateConfrenceSteam("video");
+        let data={"status":videoStatus,'participant_id' :videoLoginUserId,"meeting_id":active_meeting_id};
+        socket.emit("video_change",data);
     }
     toggleAudio(){
         audioStatus=audioStatus?false:true;
@@ -147,8 +148,9 @@ class CattleCall {
         for (let track of localVideoStream.getAudioTracks() ){
             track.enabled = !track.enabled ;
         }
-        let data={"status":audioStatus,'share_user_id' : active_meeting_id};
-        socket.emit("audio_toogle",data);
+        updateConfrenceSteam("audio");
+        let data={"status":audioStatus,'participant_id' : videoLoginUserId,"meeting_id":active_meeting_id};
+        socket.emit("audio_change",data);
     }
     muteParticipant(participentId){
         if(!participentId){return __this.onerror("participant id required");} 
@@ -183,6 +185,11 @@ class CattleCall {
         let data={meeting_id:active_meeting_id};
         socket.emit("end_meeting",data); 
         endConference()
+    }
+    spotlightUser(participentId){
+        if(!participentId){return __this.onerror("participant id required");} 
+        let data={'participant_id' : participentId,meeting_id:active_meeting_id};
+        socket.emit("spotlight_user",data);
     }
 
    /** getDevices is used to get audio / video devices **/
@@ -272,11 +279,20 @@ class CattleCall {
             }
             endConference();
         }) 
+        socket.on('spotlight_user',function(data){
+            if(typeof __this.spotlightUser=="function"){
+            __this.spotlightUser(data);
+            }
+        })
         socket.on('cattle_call_error', (error) => {
             console.log(error);
         });
         socket.on('error', (error) => {
-           __this.onerror(error);
+            if(typeof __this.onerror=="function"){
+                __this.onerror(error);
+            }else{
+                console.error(error)
+            }
         });
     }
     
@@ -370,6 +386,18 @@ function initVideoConferenceWebRtc(id,toId,negotiate){
 }
 
 function setConferenceVideo(stream,id){
+    let options={}
+        speechEvents[id] = hark(stream, options);
+        speechEvents[id].on('speaking', function(data) {
+            if(typeof __this.speaking!="undefined"){
+            __this.speaking(id);
+            }
+        });
+        speechEvents[id].on('stopped_speaking', function(data) {
+            if(typeof __this.stoppedSpeaking!="undefined"){
+            __this.stoppedSpeaking(id);
+            }
+        });
     if(typeof __this.userSreamAdded!="undefined"){
         __this.userSreamAdded(stream,id)
     }
@@ -380,7 +408,28 @@ function addConferenceStream(id){
         rtcPeerConn[id].addStream(localVideoStream);
     }
 }
-
+function updateConfrenceSteam(type){
+    let track="";
+    if(type=="audio"){
+        track=localVideoStream.getAudioTracks()[0];
+    }
+    if(type=="video"){
+        track=localVideoStream.getVideoTracks()[0];
+    }
+    for(let connection in rtcPeerConn ){
+        var sender = rtcPeerConn[connection].getSenders().find(function(s) {
+          return s.track.kind == track.kind;
+        });
+        let newtrack="";
+        if(type=="audio"){
+            newtrack=localVideoStream.getAudioTracks()[0];
+        }
+        if(type=="video"){
+            newtrack=localVideoStream.getVideoTracks()[0];
+        }
+        sender.replaceTrack(newtrack);
+    }
+}
 function removeConferenceStream(id){
     if(typeof rtcPeerConn[id] != "undefined"){
         rtcPeerConn[id].removeStream(localVideoStream);
@@ -455,8 +504,16 @@ function addStream(callback){
     if(localVideoStream != null){
         localVideoStream.stop();
     }
+    let echoCancellation=false;
+    let noiseSuppression=false;
+    if (navigator.mediaDevices.getSupportedConstraints().echoCancellation){
+        echoCancellation=true;
+    }
+    if (navigator.mediaDevices.getSupportedConstraints().noiseSuppression){
+        noiseSuppression=true;
+    }
     const constraints = {
-        audio: audioStatus?{deviceId: audioSource ? audioSource : "default"}:audioStatus,
+        audio: audioStatus?{deviceId: audioSource ? audioSource : "default",echoCancellation:echoCancellation,noiseSuppression:noiseSuppression}:audioStatus,
         video: videoStatus?{deviceId: videoSource ? videoSource : "default"}:videoStatus
       };
       
