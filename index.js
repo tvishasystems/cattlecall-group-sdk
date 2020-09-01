@@ -350,15 +350,15 @@ function initVideoConferenceWebRtc(id,toId,negotiate){
         if(rtcPeerConn[id].signalingState != "stable"){
             return;
         }
-        // if(rtcPeerConn[id]._negotiating === true){
-        //     return;
-        // }else{
-        //     rtcPeerConn[id]._negotiating = true;
-        // }
-        // if(!$this.doNegotication){
-        //     $this.doNegotication = true;
-        //     return;
-        // }
+        if(rtcPeerConn[id]._negotiating === true){
+            return;
+        }else{
+            rtcPeerConn[id]._negotiating = true;
+        }
+        if(!$this.doNegotication){
+            $this.doNegotication = true;
+            return;
+        }
         rtcPeerConn[id].createOffer().then((desc)=>{
             rtcPeerConn[id].setLocalDescription(desc).then(()=> {
                 $this.socket.emit('video_conference_signal',{type:"offer", offer: rtcPeerConn[id].localDescription,from : $this.videoLoginUserId,to : toId,meeting_id : $this.active_meeting_id});
@@ -410,7 +410,6 @@ function initVideoConferenceWebRtc(id,toId,negotiate){
         }
     };
     rtcPeerConn[id].ontrack = function (evt) {
-        console.log(evt.streams,"logfromsdk");
         setConferenceVideo(evt.streams[0],id);
     };
     if($this.localVideoStream){
