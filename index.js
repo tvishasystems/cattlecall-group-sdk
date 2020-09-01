@@ -373,8 +373,8 @@ function initVideoConferenceWebRtc(id,toId,negotiate){
 
         }
     };
-    rtcPeerConn[id].onaddstream = function (evt) {
-        setConferenceVideo(evt.stream,id);
+    rtcPeerConn[id].ontrack = function (evt) {
+        setConferenceVideo(evt.streams[0],id);
     };
     if(localVideoStream){
         addConferenceStream(id);
@@ -405,7 +405,7 @@ function setConferenceVideo(stream,id){
 
 function addConferenceStream(id){
     if(typeof rtcPeerConn[id] != "undefined"){
-        rtcPeerConn[id].addStream(localVideoStream);
+        localVideoStream.getTracks().forEach(track => rtcPeerConn[id].addTrack(track, localVideoStream));
     }
 }
 function updateConfrenceSteam(type){
