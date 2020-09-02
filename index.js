@@ -471,7 +471,6 @@ function removeParticipant(id){
         rtcPeerConn[id].removeStream($this.localVideoStream);
         rtcPeerConn[id].close();
         rtcPeerConn[id]=null;
-        $this.localVideoStream.stop();
     }
     
 }
