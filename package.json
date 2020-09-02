@@ -1,6 +1,6 @@
 {
   "name": "cattlecall-conference-sdk",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "description": "cattle call group video call or conference sdk",
   "main": "index.js",
   "scripts": {

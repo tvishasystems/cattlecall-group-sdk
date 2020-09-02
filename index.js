@@ -51,10 +51,9 @@ class CattleCall extends Emitter{
         this.userId = user_id;
         $this.userId = user_id;
         $this.videoLoginUserId=user_id;
-        getServers();
+        //getServers();
         listenSockets();
         $this.connectionState="connected";
-        //console.log("wqwqw")
        })
     }
     logout(){
@@ -78,7 +77,6 @@ class CattleCall extends Emitter{
                 return reject("password requered")
             }
             let data={meeting_id:meeting_id,password:password};
-            //console.log($this.socket);
             $this.socket.emit("create_meeting",data,function(response){
                 if(response.success){
                     resolve(response);
@@ -107,17 +105,14 @@ class CattleCall extends Emitter{
                 reject("meeting id requered")
             }
             let data={meeting_id:meeting_id,password:password};
-            $this.socket.emit("join_meeting",data,function(response){
+            $this.socket.emit("join_meeting",data,async function(response){
                 if(response.success){
                     resolve(response);
                     $this.active_meeting_id=meeting_id;
                     let participents=response.data;
-                    participents.forEach(items=>{
-                        if(items.user_id!=$this.videoLoginUserId){
+                    await participents.forEach(items=>{
                             initVideoConferenceWebRtc(items.user_id,items.user_id,true)
-                        }
                     });
-                    addStream();
                 }
                 reject(response);
             })
@@ -312,6 +307,10 @@ function listenSockets(){
     $this.socket.on('error', (error) => {
        $this.emit("error",error);
     });
+    $this.socket.on('user_disconnected',data=>{
+        $this.emit('user_left',data);
+        removeParticipant(data.participant_id);
+    })
 }
 function registerUser(data){
     return new Promise(async (resolve,rejects)=>{
@@ -339,10 +338,10 @@ function getServers(){
     })
 }
 
-function initVideoConferenceWebRtc(id,toId,negotiate){
+async function initVideoConferenceWebRtc(id,toId,negotiate){
     rtcPeerConn[id] = new RTCPeerConnection($this.configurationConferenceVideocall);
     rtcPeerConn[id].onicecandidate = function (evt) {
-        if (evt.candidate){
+        if (evt.candidate && $this.videoLoginUserId!=toId){
             $this.socket.emit('video_conference_signal',{type:"candidate", candidate: evt.candidate,from :$this.videoLoginUserId,to : toId,meeting_id : $this.active_meeting_id});
         }
     };
@@ -350,19 +349,26 @@ function initVideoConferenceWebRtc(id,toId,negotiate){
         if(rtcPeerConn[id].signalingState != "stable"){
             return;
         }
+        if(typeof rtcPeerConn[id]._do_negotiate === "undefined") rtcPeerConn[id]._do_negotiate = true;
+        if(!rtcPeerConn[id]._do_negotiate){
+            rtcPeerConn[id]._do_negotiate = true;
+            return;
+        }
         if(rtcPeerConn[id]._negotiating === true){
             return;
         }else{
             rtcPeerConn[id]._negotiating = true;
         }
-        if(!$this.doNegotication){
-            $this.doNegotication = true;
-            return;
-        }
         rtcPeerConn[id].createOffer().then((desc)=>{
+            if(rtcPeerConn[id].signalingState != "stable"){
+                rtcPeerConn[id]._negotiating = false;
+                return;
+            }
             rtcPeerConn[id].setLocalDescription(desc).then(()=> {
+                if($this.videoLoginUserId!=toId){
                 $this.socket.emit('video_conference_signal',{type:"offer", offer: rtcPeerConn[id].localDescription,from : $this.videoLoginUserId,to : toId,meeting_id : $this.active_meeting_id});
                 rtcPeerConn[id]._negotiating = false;
+                }
             }).catch(error=>{
                 console.log("setLocalDescription error",error);
                 rtcPeerConn[id]._negotiating = false;
@@ -383,27 +389,20 @@ function initVideoConferenceWebRtc(id,toId,negotiate){
     rtcPeerConn[id].oniceconnectionstatechange = function() {
         try{
             if(rtcPeerConn[id].iceConnectionState == 'failed') {
-                rtcPeerConn[id].createOffer({"iceRestart": true}).then((desc)=>{
-                    rtcPeerConn[id].setLocalDescription(desc).then(()=> {
-                        $this.socket.emit('video_conference_signal',{type:"offer", offer: rtcPeerConn[id].localDescription,from : $this.videoLoginUserId,to : toId,meeting_id : $this.meeting_id});
-                    }).catch(error=>{
-                        console.log("setLocalDescription error",error)
-                    });
-                }).catch(err=>{
-                    console.log("offer error",err);
-                });
+                console.log("failed-----------");
+                $this.emit("disconnect",id);
             }else if(rtcPeerConn[id].iceConnectionState == 'connected'){
-               //updateConferenceStatus(toId,false,"");
+                console.log("connected-----------");
             }else if(rtcPeerConn[id].iceConnectionState == 'closed'){
                 //__this.leaveMeeting();
                // updateConferenceStatus(toId,true,"User disconnected..");
+               console.log("closed----------");
                $this.emit("disconnect",id);
             }else if(rtcPeerConn[id].iceConnectionState == 'disconnected'){
+                console.log("disconnected------");
                 $this.emit("disconnect",id);
-                //__this.leaveMeeting();
-               // updateConferenceStatus(toId,true,"User disconnected..");
-                /*rtcPeerConn[id].close();
-                initVideoConferenceWebRtc(id,toId,true);*/
+            }else if(rtcPeerConn[id].iceConnectionState == 'new'){
+                console.log("new-----------")
             }
         }catch (e){
 
@@ -415,7 +414,7 @@ function initVideoConferenceWebRtc(id,toId,negotiate){
     if($this.localVideoStream){
         addConferenceStream(id);
     }else{
-        addStream(function(){
+       await addStream(function(){
             addConferenceStream(id);
         });
     }
@@ -430,7 +429,6 @@ function setConferenceVideo(stream,id){
         speechEvents[id].on('stopped_speaking', function(data) {
             $this.emit("stopped_speaking",id);
         });
-    console.log(id,"dsdsdsssss")
     $this.emit("user_stream_added",stream,id);
 }
 
@@ -449,11 +447,9 @@ function updateConfrenceSteam(type){
         track=$this.localVideoStream.getVideoTracks()[0];
     }
     for(let connection in rtcPeerConn ){
-        console.log(connection);
         var sender = rtcPeerConn[connection].getSenders().find(function(s) {
           return s.track.kind == track.kind;
         });
-        console.log('found sender:', sender);
         let newtrack="";
         if(type=="audio"){
             newtrack=$this.localVideoStream.getAudioTracks()[0];
@@ -496,13 +492,15 @@ function endConference(){
 function onVideoConferenceOffer(offer,id,toId) {
     if(typeof rtcPeerConn[id] !== "undefined"){
         if(rtcPeerConn[id].signalingState == "have-local-offer"){
-            rtcPeerConn[id].close();
+            rtcPeerConn[id]._do_negotiate = false;
             initVideoConferenceWebRtc(id,toId,true);
-            $this.doNegotication=false;
         }
+        // if(rtcPeerConn[id].signalingState == "stable"){
+        //     rtcPeerConn[id]._do_negotiate = false;
+        //     initVideoConferenceWebRtc(id,toId,true);
+        // }
     }else if(!rtcPeerConn[id]){
         initVideoConferenceWebRtc(id,toId,true);
-        $this.doNegotication=false;
     }
     rtcPeerConn[id].setRemoteDescription(new RTCSessionDescription(offer)).then(() => {
         rtcPeerConn[id].createAnswer().then(function(answer){
@@ -516,19 +514,34 @@ function onVideoConferenceOffer(offer,id,toId) {
     })
 }
 
+// function onVideoConferenceAnswer(answer,id,toId) {
+//     if(!rtcPeerConn[id]){
+//         initVideoConferenceWebRtc(id,toId,false);
+//         $this.doNegotication=true;
+//     }
+//     rtcPeerConn[id].setRemoteDescription(new RTCSessionDescription(answer));
+// }
 function onVideoConferenceAnswer(answer,id,toId) {
     if(!rtcPeerConn[id]){
         initVideoConferenceWebRtc(id,toId,false);
-        $this.doNegotication=true;
+        return;
     }
-    rtcPeerConn[id].setRemoteDescription(new RTCSessionDescription(answer));
+    if(rtcPeerConn[id].signalingState === "have-local-offer"){
+        rtcPeerConn[id].setRemoteDescription(new RTCSessionDescription(answer));
+    }else if(rtcPeerConn[id].signalingState === "stable"){
+        setTimeout(function(){
+            initVideoConferenceWebRtc(id,toId,false);
+        },500);
+    }
 }
 
 function onVideoConferenceCandidate(candidate,id,toId) {
     if(!rtcPeerConn[id]){
         initVideoConferenceWebRtc(id,toId,false);
     }
-    rtcPeerConn[id].addIceCandidate(new RTCIceCandidate(candidate));
+    rtcPeerConn[id].addIceCandidate(new RTCIceCandidate(candidate)).catch(error=>{
+        console.log(error,"addIceCandidate")
+    });
 }
 
 /** addStream is used to set local stream to peer connection **/
@@ -550,7 +563,6 @@ function addStream(callback){
         audio: $this.audioStatus?{deviceId: $this.audioSource ? $this.audioSource : "default",echoCancellation:echoCancellation,noiseSuppression:noiseSuppression}:$this.audioStatus,
         video: $this.videoStatus?{deviceId: $this.videoSource ? $this.videoSource : "default"}:$this.videoStatus
       };
-      console.log(constraints);
     navigator.mediaDevices.getUserMedia(constraints).then(stream => {
         $this.localVideoStream = stream;
         $this.localVideoStream.stop = function () {
