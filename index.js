@@ -472,7 +472,6 @@ function removeParticipant(id){
         rtcPeerConn[id].close();
         rtcPeerConn[id]=null;
     }
-    
 }
 function endConference(){
     for(let key in rtcPeerConn){
