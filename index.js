@@ -44,6 +44,51 @@ class CattleCall extends Emitter{
             });
         })
     }
+    scheduleMeeting(meeting_id,password,user_id){
+        return new Promise((resolve,reject)=>{
+            createMeeting(meeting_id,password,user_id).then(response=>{
+                resolve(response);
+            }).catch(error=>{
+                reject(error);
+            });
+        })
+    }
+    startMeeting(meeting_id,password){
+        return new Promise(async(resolve,reject)=>{
+            if($this.connectionState!=="connected") return reject("invalid request, connection missing");
+            if(meeting_id=="" || meeting_id===undefined){
+                return reject("meeting id requered")
+            }
+            if(password=="" || password===undefined){
+                return reject("password requered")
+            }
+            let data={meeting_id:meeting_id,password:password};
+            $this.socket.emit("start_meeting",data,function(response){
+                if(response.success){
+                    resolve(response);
+                }
+                reject(response);
+            })
+        });
+    }
+    isMeetingStarted(meeting_id,password){
+        return new Promise(async(resolve,reject)=>{
+            if($this.connectionState!=="connected") return reject("invalid request, connection missing");
+            if(meeting_id=="" || meeting_id===undefined){
+                return reject("meeting id requered")
+            }
+            if(password=="" || password===undefined){
+                return reject("password requered")
+            }
+            let data={meeting_id:meeting_id,password:password};
+            $this.socket.emit("is_meeting_started",data,function(response){
+                if(response.success){
+                    resolve(response);
+                }
+                reject(response);
+            })
+        });
+    }
     connect(user_id){
        $this.socket=this.socket=socketClient.connect(SERVER_URL, {query: "client_id="+this.clientId+"&clientSecret="+this.clientSecret+"&user_id="+user_id+"&platform=1"});
        //$this.socket=this.socket,
@@ -105,13 +150,21 @@ class CattleCall extends Emitter{
                 reject("meeting id requered")
             }
             let data={meeting_id:meeting_id,password:password};
+            $this.socket.emit("is_meeting_started",data,function(response){
+                if(!response.success && response.type===1){
+                    resolve(response);
+                }
+               
+            })
             $this.socket.emit("join_meeting",data,async function(response){
                 if(response.success){
                     resolve(response);
                     $this.active_meeting_id=meeting_id;
                     let participents=response.data;
-                    await participents.forEach(items=>{
+                    addStream(async function(){
+                        await participents.forEach(items=>{
                             initVideoConferenceWebRtc(items.user_id,items.user_id,true)
+                        });
                     });
                 }
                 reject(response);
@@ -139,6 +192,20 @@ class CattleCall extends Emitter{
         //updateConfrenceSteam("audio");
         let data={"status":$this.audioStatus,'participant_id' : $this.videoLoginUserId,"meeting_id":$this.active_meeting_id};
         $this.socket.emit("audio_change",data);
+    }
+    changeVideoSource(id){
+        if(!id)return $this.emit("error","invalid source");
+        $this.videoSource=id;
+        addStream(function(){
+            updateConfrenceSteam("video");
+        })
+    }
+    changeAudioSource(id){
+        if(!id)return $this.emit("error","invalid source");
+        $this.videoSource=id;
+        addStream(function(){
+            updateConfrenceSteam("audio");
+        })
     }
     muteParticipant(participentId){
         if($this.connectionState!=="connected") return $this.emit("error","invalid request, connection missing");
@@ -197,6 +264,22 @@ class CattleCall extends Emitter{
    /** getDevices is used to get audio / video devices **/
 
     getDevices(callback) {
+        navigator.mediaDevices.getUserMedia({audio:true})
+        .then(function() {
+           console.log("audio working");
+        }).catch(function(err) { 
+            if(err.name==="NotFoundError"){
+                $this.audioStatus=false;
+            }
+         });
+        navigator.mediaDevices.getUserMedia({video:true})
+        .then(function() {
+           console.log("video working");
+        }).catch(function(err) {  
+            if(err.name==="NotFoundError"){
+                $this.videoStatus=false;
+            } 
+        });
         var videoInputs = [];
         var audioInputs = [];
         navigator.mediaDevices.enumerateDevices().then(function(deviceInfos){
@@ -287,6 +370,9 @@ function listenSockets(){
     $this.socket.on("video_change",function(data){
         $this.emit('video_change',data);
     });
+    $this.socket.on('meeting_started',function(data){
+        $this.emit('meeting_started',data);
+    })
     $this.socket.on('leave_meeting',function(data){
         $this.emit('user_left',data);
         removeParticipant(data.participant_id);
@@ -330,6 +416,31 @@ function registerUser(data){
         })
     })
 }
+function createMeeting(meeting_id,password,user_id){
+    return new Promise(async (resolve,rejects)=>{
+        if(user_id=="" || user_id===undefined){
+            return reject("user id requered")
+        }
+        if(meeting_id=="" || meeting_id===undefined){
+            return reject("meeting id requered")
+        }
+        if(password=="" || password===undefined){
+            return reject("password requered")
+        }
+        if(!$this.clientId || !$this.clientSecret){
+            return reject("invalid request")
+        }
+        await axios.post("/api/v1/create-meeting",{user_id:user_id,meeting_id:meeting_id,password:password,clientId:$this.clientId,client_secret:$this.clientSecret}).then(response=>{
+            if(response.data.success){
+                resolve(response.data);
+            }else{
+                rejects(response.data);
+            }
+        }).catch(error=>{
+            rejects({success:false,message:error.message});
+        })
+    })
+}
 
 function getServers(){
     let data={};
@@ -339,6 +450,7 @@ function getServers(){
 }
 
 async function initVideoConferenceWebRtc(id,toId,negotiate){
+    if(rtcPeerConn[id]) return false;
     rtcPeerConn[id] = new RTCPeerConnection($this.configurationConferenceVideocall);
     rtcPeerConn[id].onicecandidate = function (evt) {
         if (evt.candidate && $this.videoLoginUserId!=toId){
@@ -374,15 +486,15 @@ async function initVideoConferenceWebRtc(id,toId,negotiate){
                 rtcPeerConn[id]._negotiating = false;
             });
         }).catch(e=>{
-            console.log("offer error",error);
             rtcPeerConn[id]._negotiating = false;
         });
     };
-
+    rtcPeerConn[id].onremovetrack=function(){
+        console.log("track removed");
+    };
     rtcPeerConn[id].onopen = function () {
         console.log("Connected");
     };
-
     rtcPeerConn[id].onerror = function (err) {
         console.log("Got error", err);
     };
@@ -414,10 +526,11 @@ async function initVideoConferenceWebRtc(id,toId,negotiate){
     if($this.localVideoStream){
         addConferenceStream(id);
     }else{
-       await addStream(function(){
+        addStream(function(){
             addConferenceStream(id);
-        });
+        })
     }
+    
 }
 
 function setConferenceVideo(stream,id){
@@ -467,8 +580,12 @@ function removeConferenceStream(id){
     }
 }
 function removeParticipant(id){
-    if(typeof rtcPeerConn[id] != "undefined"){
-        rtcPeerConn[id].removeStream($this.localVideoStream);
+    if(typeof rtcPeerConn[id] != "undefined" && rtcPeerConn[id] != null){
+        let track=$this.localVideoStream.getTracks()[0];
+        var sender = rtcPeerConn[id].getSenders().find(function(s) {
+            return s.track.kind == track.kind;
+          });
+        rtcPeerConn[id].removeTrack(sender);
         rtcPeerConn[id].close();
         rtcPeerConn[id]=null;
     }
@@ -477,32 +594,32 @@ function endConference(){
     for(let key in rtcPeerConn){
         if(rtcPeerConn[key]){
             rtcPeerConn[key].close();
-            rtcPeerConn[key]=null;
             rtcPeerConn[key].onicecandidate = null;
             rtcPeerConn[key].ontrack = null;
-            $this.localVideoStream.stop();
-            $this.localVideoStream=null;
+            rtcPeerConn[key]=null;
         }
     }
+    if($this.localVideoStream)$this.localVideoStream.stop();
+    $this.localVideoStream=null;
 }
 
 
 function onVideoConferenceOffer(offer,id,toId) {
-    if(typeof rtcPeerConn[id] !== "undefined"){
-        if(rtcPeerConn[id].signalingState == "have-local-offer"){
-            rtcPeerConn[id]._do_negotiate = false;
-            initVideoConferenceWebRtc(id,toId,true);
-        }
-        // if(rtcPeerConn[id].signalingState == "stable"){
+    console.log("offer step 1","test log");
+    if(!rtcPeerConn[id]){
+        initVideoConferenceWebRtc(id,toId,true);
+    }else if(typeof rtcPeerConn[id] !== "undefined"){
+        // if(rtcPeerConn[id].signalingState == "have-local-offer"){
         //     rtcPeerConn[id]._do_negotiate = false;
         //     initVideoConferenceWebRtc(id,toId,true);
         // }
-    }else if(!rtcPeerConn[id]){
-        initVideoConferenceWebRtc(id,toId,true);
-    }
-    rtcPeerConn[id].setRemoteDescription(new RTCSessionDescription(offer)).then(() => {
+        console.log("localoffer")
+    } 
+    rtcPeerConn[id].setRemoteDescription(new RTCSessionDescription(offer)).then(()=>{
         rtcPeerConn[id].createAnswer().then(function(answer){
-            rtcPeerConn[id].setLocalDescription(answer);
+            rtcPeerConn[id].setLocalDescription(answer).catch(error=>{
+                console.log(error);
+            });
             $this.socket.emit('video_conference_signal',{type:"answer", answer: answer,from :$this.videoLoginUserId,to : toId,meeting_id : $this.active_meeting_id});
         }).catch(error=>{
             console.log(error,"error while creating answer");
@@ -544,11 +661,12 @@ function onVideoConferenceCandidate(candidate,id,toId) {
 
 /** addStream is used to set local stream to peer connection **/
 
-function addStream(callback){
+function addStream(callback,streamtype=""){
     // get a local stream, show it in our video tag and add it to be sent
     if($this.localVideoStream != null){
         $this.localVideoStream.stop();
     }
+    let videoConstraints={deviceId:"default"};
     let echoCancellation=false;
     let noiseSuppression=false;
     if (navigator.mediaDevices.getSupportedConstraints().echoCancellation){
@@ -557,9 +675,26 @@ function addStream(callback){
     if (navigator.mediaDevices.getSupportedConstraints().noiseSuppression){
         noiseSuppression=true;
     }
+    if (navigator.mediaDevices.getSupportedConstraints().height) {
+        videoConstraints.height= { min: 300, ideal: 1080, max:1080 }
+    }
+    if (navigator.mediaDevices.getSupportedConstraints().width) {
+        videoConstraints.width= { min: 530, ideal: 1920, max: 1920 };
+    }
+    if (navigator.mediaDevices.getSupportedConstraints().aspectRatio){
+        videoConstraints.aspectRatio="1.7777777778";
+    }
+    if (navigator.mediaDevices.getSupportedConstraints().frameRate){
+        videoConstraints.frameRate={max:30};
+    }
+    if($this.videoSource){
+        videoConstraints.deviceId=$this.videoSource;
+    }
+    console.log(videoConstraints)
+    
     const constraints = {
         audio: $this.audioStatus?{deviceId: $this.audioSource ? $this.audioSource : "default",echoCancellation:echoCancellation,noiseSuppression:noiseSuppression}:$this.audioStatus,
-        video: $this.videoStatus?{deviceId: $this.videoSource ? $this.videoSource : "default"}:$this.videoStatus
+        video: $this.videoStatus?videoConstraints:$this.videoStatus
       };
     navigator.mediaDevices.getUserMedia(constraints).then(stream => {
         $this.localVideoStream = stream;
@@ -577,9 +712,9 @@ function addStream(callback){
          if(callback){
             callback(stream);
          }
-        
       }).catch(err=>{
         //alert("Camera device is not readable");
+        $this.emit("error",err);
         console.log("media err",err);
       });
 }
