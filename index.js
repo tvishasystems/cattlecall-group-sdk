@@ -397,6 +397,14 @@ function listenSockets(){
         $this.emit('user_left',data);
         removeParticipant(data.participant_id);
     })
+    $this.socket.on('participant_removed',data=>{
+        $this.emit("user_left",data);
+        if(data.participant_id==$this.user_id){
+            endConference();
+        }else{
+            removeParticipant(data.participant_id);
+        }
+    })
 }
 function registerUser(data){
     return new Promise(async (resolve,rejects)=>{
@@ -553,23 +561,11 @@ function addConferenceStream(id){
 }
 function updateConfrenceSteam(type){
     let track="";
-    if(type=="audio"){
-        track=$this.localVideoStream.getAudioTracks()[0];
-    }
-    if(type=="video"){
-        track=$this.localVideoStream.getVideoTracks()[0];
-    }
     for(let connection in rtcPeerConn ){
         var sender = rtcPeerConn[connection].getSenders().find(function(s) {
           return s.track.kind == track.kind;
         });
-        let newtrack="";
-        if(type=="audio"){
-            newtrack=$this.localVideoStream.getAudioTracks()[0];
-        }
-        if(type=="video"){
-            newtrack=$this.localVideoStream.getVideoTracks()[0];
-        }
+        let newtrack=$this.localVideoStream.getTracks()[0];
         sender.replaceTrack(newtrack);
     }
 }
@@ -676,10 +672,10 @@ function addStream(callback,streamtype=""){
         noiseSuppression=true;
     }
     if (navigator.mediaDevices.getSupportedConstraints().height) {
-        videoConstraints.height= { min: 300, ideal: 1080, max:1080 }
+        videoConstraints.height= { min: 180, ideal: 480, max:720 };
     }
     if (navigator.mediaDevices.getSupportedConstraints().width) {
-        videoConstraints.width= { min: 530, ideal: 1920, max: 1920 };
+        videoConstraints.width= { min: 320, ideal: 640, max: 1280 };
     }
     if (navigator.mediaDevices.getSupportedConstraints().aspectRatio){
         videoConstraints.aspectRatio="1.7777777778";
