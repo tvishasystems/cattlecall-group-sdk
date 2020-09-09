@@ -22,6 +22,7 @@ class CattleCall extends Emitter{
         this.socket="",
         this.userId=0;
         this.localVideoStream=null;
+        this.localScreenStream=null;
         this.active_meeting_id=0;
         this.audioStatus=true,
         this.videoStatus=true,
@@ -259,6 +260,11 @@ class CattleCall extends Emitter{
         let data={meeting_id:$this.active_meeting_id};
         $this.socket.emit("end_meeting",data); 
         endConference()
+    }
+    shareScreen(){
+        getMediaStream(function(){
+            addScreenShareStreem();
+        })
     }
 
    /** getDevices is used to get audio / video devices **/
@@ -509,8 +515,16 @@ async function initVideoConferenceWebRtc(id,toId,negotiate){
     rtcPeerConn[id].oniceconnectionstatechange = function() {
         try{
             if(rtcPeerConn[id].iceConnectionState == 'failed') {
-                console.log("failed-----------");
-                $this.emit("disconnect",id);
+                rtcPeerConn[id].createOffer({"iceRestart": true}).then((desc)=>{
+                    rtcPeerConn[id].setLocalDescription(desc).then(()=> {
+                        console.log(id,"-----failed connection id----------",toId);
+                        socket.emit('video_conference_signal',{type:"offer", offer: rtcPeerConn[id].localDescription,from : videoLoginUserId,to : toId,meeting_id : meeting_id});
+                    }).catch(error=>{
+                        console.log("setLocalDescription error",error)
+                    });
+                }).catch(err=>{
+                    console.log("offer error",err)
+                });
             }else if(rtcPeerConn[id].iceConnectionState == 'connected'){
                 console.log("connected-----------");
             }else if(rtcPeerConn[id].iceConnectionState == 'closed'){
@@ -529,6 +543,9 @@ async function initVideoConferenceWebRtc(id,toId,negotiate){
         }
     };
     rtcPeerConn[id].ontrack = function (evt) {
+        console.log(evt);
+        console.log(evt.streams,"remote streams");
+        evt.streams[0].getTracks().forEach(track=>console.log(track));
         setConferenceVideo(evt.streams[0],id);
     };
     if($this.localVideoStream){
@@ -557,6 +574,19 @@ function addConferenceStream(id){
     if(typeof rtcPeerConn[id] != "undefined"){
         $this.localVideoStream.getTracks().forEach(track => rtcPeerConn[id].addTrack(track, $this.localVideoStream));
         //rtcPeerConn[id].addStream($this.localVideoStream);
+    }
+}
+function addScreenShareStreem(){
+    for(let connection in rtcPeerConn ){
+        // var sender = rtcPeerConn[connection].getSenders().find(function(s) {
+        //   return s.track.kind == track.kind;
+        // });
+        //let newtrack=$this.localScreenStream.getTracks()[0];
+        $this.localScreenStream.getTracks().forEach(track => {
+            $this.localScreenStream.contentype="saikiranchowdhary"
+            rtcPeerConn[connection].addTrack(track,$this.localScreenStream)
+        })
+        ;
     }
 }
 function updateConfrenceSteam(type){
@@ -625,13 +655,7 @@ function onVideoConferenceOffer(offer,id,toId) {
     })
 }
 
-// function onVideoConferenceAnswer(answer,id,toId) {
-//     if(!rtcPeerConn[id]){
-//         initVideoConferenceWebRtc(id,toId,false);
-//         $this.doNegotication=true;
-//     }
-//     rtcPeerConn[id].setRemoteDescription(new RTCSessionDescription(answer));
-// }
+
 function onVideoConferenceAnswer(answer,id,toId) {
     if(!rtcPeerConn[id]){
         initVideoConferenceWebRtc(id,toId,false);
@@ -649,10 +673,14 @@ function onVideoConferenceAnswer(answer,id,toId) {
 function onVideoConferenceCandidate(candidate,id,toId) {
     if(!rtcPeerConn[id]){
         initVideoConferenceWebRtc(id,toId,false);
+        return;
     }
-    rtcPeerConn[id].addIceCandidate(new RTCIceCandidate(candidate)).catch(error=>{
-        console.log(error,"addIceCandidate")
-    });
+    setTimeout(function(){
+        rtcPeerConn[id].addIceCandidate(new RTCIceCandidate(candidate)).catch(error=>{
+            console.log(error,"addIceCandidate")
+        });
+    },1000)
+    
 }
 
 /** addStream is used to set local stream to peer connection **/
@@ -712,6 +740,22 @@ function addStream(callback,streamtype=""){
         //alert("Camera device is not readable");
         $this.emit("error",err);
         console.log("media err",err);
+      });
+}
+function getMediaStream(callback){
+    // get a local stream, show it in our video tag and add it to be sent    
+    const constraints = {};
+    navigator.mediaDevices.getDisplayMedia(constraints).then(stream => {
+        $this.localScreenStream = stream;
+        stream.getTracks().forEach(track => console.log(track))
+        // stream.getTracks().forEach(track => rtcPeerConn.addTrack(track, stream));
+         if(callback){
+            callback(stream);
+         }
+      }).catch(err=>{
+        //alert("Camera device is not readable");
+        $this.emit("error",err);
+        console.log("screen media err",err);
       });
 }
 module.exports = CattleCall;
