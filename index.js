@@ -32,6 +32,8 @@ class CattleCall extends Emitter{
         this.configurationConferenceVideocall=null;
         this.doNegotication=true;
         this.connectionState="pending";
+        this.screenScharetrackId=null;
+        this.incomingScreenShare=null;
         //this.rtcPeerConn={};
         //this.connectionStatus="not-connected";
         $this = this;
@@ -155,7 +157,6 @@ class CattleCall extends Emitter{
                 if(!response.success && response.type===1){
                     resolve(response);
                 }
-               
             })
             $this.socket.emit("join_meeting",data,async function(response){
                 if(response.success){
@@ -263,6 +264,8 @@ class CattleCall extends Emitter{
     }
     shareScreen(){
         getMediaStream(function(){
+            let data={meeting_id:$this.active_meeting_id,track_id:$this.screenScharetrackId,participant_id:$this.videoLoginUserId};
+            $this.socket.emit("screen_share_track",data);
             addScreenShareStreem();
         })
     }
@@ -411,6 +414,10 @@ function listenSockets(){
             removeParticipant(data.participant_id);
         }
     })
+    $this.socket.on("screen_share_track",data=>{
+        console.log(data,"screen share")
+        $this.incomingScreenShare=data.track_id;
+    })
 }
 function registerUser(data){
     return new Promise(async (resolve,rejects)=>{
@@ -515,25 +522,28 @@ async function initVideoConferenceWebRtc(id,toId,negotiate){
     rtcPeerConn[id].oniceconnectionstatechange = function() {
         try{
             if(rtcPeerConn[id].iceConnectionState == 'failed') {
-                rtcPeerConn[id].createOffer({"iceRestart": true}).then((desc)=>{
-                    rtcPeerConn[id].setLocalDescription(desc).then(()=> {
-                        console.log(id,"-----failed connection id----------",toId);
-                        socket.emit('video_conference_signal',{type:"offer", offer: rtcPeerConn[id].localDescription,from : videoLoginUserId,to : toId,meeting_id : meeting_id});
-                    }).catch(error=>{
-                        console.log("setLocalDescription error",error)
+                if (rtcPeerConn[id].restartIce) {
+                    rtcPeerConn[id].restartIce();
+                  } else {
+                    const offerOptions = {offerToReceiveAudio: 1,offerToReceiveVideo: 1,iceRestart:true};
+                      rtcPeerConn[id].createOffer(offerOptions).then((desc)=>{
+                        rtcPeerConn[id].setLocalDescription(desc).then(()=> {
+                            console.log(id,"-----failed connection id----------",toId);
+                            $this.socket.emit('video_conference_signal',{type:"offer", offer: rtcPeerConn[id].localDescription,from : videoLoginUserId,to : toId,meeting_id : meeting_id});
+                        }).catch(error=>{
+                            console.log("setLocalDescription error",error)
+                        });
+                    }).catch(err=>{
+                        console.log("offer error",err)
                     });
-                }).catch(err=>{
-                    console.log("offer error",err)
-                });
+                  }
             }else if(rtcPeerConn[id].iceConnectionState == 'connected'){
-                console.log("connected-----------");
+                console.log("connected-----------",id);
             }else if(rtcPeerConn[id].iceConnectionState == 'closed'){
-                //__this.leaveMeeting();
-               // updateConferenceStatus(toId,true,"User disconnected..");
-               console.log("closed----------");
+               console.log("closed----------",id);
                $this.emit("disconnect",id);
             }else if(rtcPeerConn[id].iceConnectionState == 'disconnected'){
-                console.log("disconnected------");
+                console.log("disconnected------",id);
                 $this.emit("disconnect",id);
             }else if(rtcPeerConn[id].iceConnectionState == 'new'){
                 console.log("new-----------")
@@ -543,9 +553,14 @@ async function initVideoConferenceWebRtc(id,toId,negotiate){
         }
     };
     rtcPeerConn[id].ontrack = function (evt) {
-        console.log(evt);
-        console.log(evt.streams,"remote streams");
-        evt.streams[0].getTracks().forEach(track=>console.log(track));
+        if($this.incomingScreenShare){
+            evt.streams[0].getTracks().forEach(track=>{
+                if(track.id== $this.incomingScreenShare){
+                    return setScreenshareVideo(evt.streams[0],id);
+                }
+            });
+            return false;
+        }
         setConferenceVideo(evt.streams[0],id);
     };
     if($this.localVideoStream){
@@ -555,7 +570,6 @@ async function initVideoConferenceWebRtc(id,toId,negotiate){
             addConferenceStream(id);
         })
     }
-    
 }
 
 function setConferenceVideo(stream,id){
@@ -573,21 +587,17 @@ function setConferenceVideo(stream,id){
 function addConferenceStream(id){
     if(typeof rtcPeerConn[id] != "undefined"){
         $this.localVideoStream.getTracks().forEach(track => rtcPeerConn[id].addTrack(track, $this.localVideoStream));
-        //rtcPeerConn[id].addStream($this.localVideoStream);
     }
 }
 function addScreenShareStreem(){
     for(let connection in rtcPeerConn ){
-        // var sender = rtcPeerConn[connection].getSenders().find(function(s) {
-        //   return s.track.kind == track.kind;
-        // });
-        //let newtrack=$this.localScreenStream.getTracks()[0];
         $this.localScreenStream.getTracks().forEach(track => {
-            $this.localScreenStream.contentype="saikiranchowdhary"
             rtcPeerConn[connection].addTrack(track,$this.localScreenStream)
-        })
-        ;
+        });
     }
+}
+function setScreenshareVideo(stream,id){
+    $this.emit("screen_stream_added",stream,id);
 }
 function updateConfrenceSteam(type){
     let track="";
@@ -629,16 +639,12 @@ function endConference(){
     $this.localVideoStream=null;
 }
 
-
 function onVideoConferenceOffer(offer,id,toId) {
     console.log("offer step 1","test log");
     if(!rtcPeerConn[id]){
         initVideoConferenceWebRtc(id,toId,true);
+        return;
     }else if(typeof rtcPeerConn[id] !== "undefined"){
-        // if(rtcPeerConn[id].signalingState == "have-local-offer"){
-        //     rtcPeerConn[id]._do_negotiate = false;
-        //     initVideoConferenceWebRtc(id,toId,true);
-        // }
         console.log("localoffer")
     } 
     rtcPeerConn[id].setRemoteDescription(new RTCSessionDescription(offer)).then(()=>{
@@ -679,8 +685,7 @@ function onVideoConferenceCandidate(candidate,id,toId) {
         rtcPeerConn[id].addIceCandidate(new RTCIceCandidate(candidate)).catch(error=>{
             console.log(error,"addIceCandidate")
         });
-    },1000)
-    
+    },1000)   
 }
 
 /** addStream is used to set local stream to peer connection **/
@@ -713,9 +718,7 @@ function addStream(callback,streamtype=""){
     }
     if($this.videoSource){
         videoConstraints.deviceId=$this.videoSource;
-    }
-    console.log(videoConstraints)
-    
+    }   
     const constraints = {
         audio: $this.audioStatus?{deviceId: $this.audioSource ? $this.audioSource : "default",echoCancellation:echoCancellation,noiseSuppression:noiseSuppression}:$this.audioStatus,
         video: $this.videoStatus?videoConstraints:$this.videoStatus
@@ -730,7 +733,6 @@ function addStream(callback,streamtype=""){
                 track.stop();
             });
         };
-        // stream.getTracks().forEach(track => rtcPeerConn.addTrack(track, stream));
         $this.localVideoSelector.srcObject =$this.localVideoStream;
         $this.localVideoSelector.muted = true;
          if(callback){
@@ -747,8 +749,7 @@ function getMediaStream(callback){
     const constraints = {};
     navigator.mediaDevices.getDisplayMedia(constraints).then(stream => {
         $this.localScreenStream = stream;
-        stream.getTracks().forEach(track => console.log(track))
-        // stream.getTracks().forEach(track => rtcPeerConn.addTrack(track, stream));
+        stream.getTracks().forEach(track => $this.screenScharetrackId=track.id);
          if(callback){
             callback(stream);
          }
