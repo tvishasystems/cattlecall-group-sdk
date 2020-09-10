@@ -3,13 +3,13 @@ const trim = require("trim");
 const adapter=require('webrtc-adapter');
 const socketClient=require("socket.io-client");
 const hark = require('hark');
-const SERVER_URL="https://cattlecall.azurewebsites.net";
-//const SERVER_URL="http://192.168.225.21:8080";
+const CATTLE_CALL_SERVER_URL="https://cattlecall.azurewebsites.net";
+//const CATTLE_CALL_SERVER_URL="http://192.168.225.21:8080";
 let Emitter = require("events").EventEmitter;
 let $this;
 let speechEvents={};
-const axios = require("axios");
-axios.defaults.baseURL = SERVER_URL, axios.defaults.headers.post["Content-Type"] = "application/json";
+const cattleCallaxios = require("axios");
+cattleCallaxios.defaults.baseURL = CATTLE_CALL_SERVER_URL, cattleCallaxios.defaults.headers.post["Content-Type"] = "application/json";
 let rtcPeerConn={};
 class CattleCall extends Emitter{
     constructor(clientId, clientSecret) {
@@ -93,7 +93,7 @@ class CattleCall extends Emitter{
         });
     }
     connect(user_id){
-       $this.socket=this.socket=socketClient.connect(SERVER_URL, {query: "client_id="+this.clientId+"&clientSecret="+this.clientSecret+"&user_id="+user_id+"&platform=1"});
+       $this.socket=this.socket=socketClient.connect(CATTLE_CALL_SERVER_URL, {query: "client_id="+this.clientId+"&clientSecret="+this.clientSecret+"&user_id="+user_id+"&platform=1"});
        //$this.socket=this.socket,
        this.socket.on("connect", function () {
         this.userId = user_id;
@@ -426,7 +426,7 @@ function registerUser(data){
         }
         data.clientId=$this.clientId;
         data.client_secret=$this.clientSecret;
-        await axios.post("/api/v1/add-user",{data:data}).then(response=>{
+        await cattleCallaxios.post("/api/v1/add-user",{data:data}).then(response=>{
             if(response.data.success){
                 resolve(response.data);
             }else{
@@ -451,7 +451,7 @@ function createMeeting(meeting_id,password,user_id){
         if(!$this.clientId || !$this.clientSecret){
             return reject("invalid request")
         }
-        await axios.post("/api/v1/create-meeting",{user_id:user_id,meeting_id:meeting_id,password:password,clientId:$this.clientId,client_secret:$this.clientSecret}).then(response=>{
+        await cattleCallaxios.post("/api/v1/create-meeting",{user_id:user_id,meeting_id:meeting_id,password:password,clientId:$this.clientId,client_secret:$this.clientSecret}).then(response=>{
             if(response.data.success){
                 resolve(response.data);
             }else{
@@ -493,6 +493,7 @@ async function initVideoConferenceWebRtc(id,toId,negotiate){
             rtcPeerConn[id]._negotiating = true;
         }
         rtcPeerConn[id].createOffer().then((desc)=>{
+            desc.sdp = handleOfferSdp(desc);
             if(rtcPeerConn[id].signalingState != "stable"){
                 rtcPeerConn[id]._negotiating = false;
                 return;
@@ -527,6 +528,7 @@ async function initVideoConferenceWebRtc(id,toId,negotiate){
                   } else {
                     const offerOptions = {offerToReceiveAudio: 1,offerToReceiveVideo: 1,iceRestart:true};
                       rtcPeerConn[id].createOffer(offerOptions).then((desc)=>{
+                        desc.sdp = handleOfferSdp(desc);
                         rtcPeerConn[id].setLocalDescription(desc).then(()=> {
                             console.log(id,"-----failed connection id----------",toId);
                             $this.socket.emit('video_conference_signal',{type:"offer", offer: rtcPeerConn[id].localDescription,from : videoLoginUserId,to : toId,meeting_id : meeting_id});
@@ -600,13 +602,12 @@ function setScreenshareVideo(stream,id){
     $this.emit("screen_stream_added",stream,id);
 }
 function updateConfrenceSteam(type){
-    let track="";
     for(let connection in rtcPeerConn ){
-        var sender = rtcPeerConn[connection].getSenders().find(function(s) {
-          return s.track.kind == track.kind;
+        rtcPeerConn[connection].getSenders().map(function(sender) {
+            sender.replaceTrack($this.localVideoStream.getTracks().find(function(track) {
+                return track.kind === sender.track.kind;
+            }));
         });
-        let newtrack=$this.localVideoStream.getTracks()[0];
-        sender.replaceTrack(newtrack);
     }
 }
 
@@ -758,6 +759,34 @@ function getMediaStream(callback){
         $this.emit("error",err);
         console.log("screen media err",err);
       });
+}
+function handleOfferSdp(offer) {
+    let sdp = offer.sdp.split('\r\n');//convert to an concatenable array
+    let new_sdp = '';
+    let position = null;
+    sdp = sdp.slice(0, -1); //remove the last comma ','
+    for(let i = 0; i < sdp.length; i++) {//look if exists already a b=AS:XXX line
+        if(sdp[i].match(/b=AS:/)) {
+            position = i; //mark the position
+        }
+    }
+    if(position) {
+        sdp.splice(position, 1);//remove if exists
+    }
+    for(let i = 0; i < sdp.length; i++) {
+        if(sdp[i].match(/m=video/)) {//modify and add the new lines for video
+            new_sdp += sdp[i] + '\r\n' + 'b=AS:' + '128' + '\r\n';
+        }
+        else {
+            if(sdp[i].match(/m=audio/)) { //modify and add the new lines for audio
+                new_sdp += sdp[i] + '\r\n' + 'b=AS:' + 64 + '\r\n';
+            }
+            else {
+                new_sdp += sdp[i] + '\r\n';
+            }
+        }
+    }
+    return new_sdp; //return the new sdp
 }
 module.exports = CattleCall;
 global.CattleCall = CattleCall;
