@@ -6,10 +6,14 @@ const hark = require('hark');
 const CATTLE_CALL_SERVER_URL="https://cattlecall.azurewebsites.net";
 //const CATTLE_CALL_SERVER_URL="http://192.168.225.21:8080";
 let Emitter = require("events").EventEmitter;
-let $this;
+let $this={};
 let speechEvents={};
-const cattleCallaxios = require("axios");
-cattleCallaxios.defaults.baseURL = CATTLE_CALL_SERVER_URL, cattleCallaxios.defaults.headers.post["Content-Type"] = "application/json";
+const axios = require("axios").default;
+//cattleCallaxios.defaults.baseURL= CATTLE_CALL_SERVER_URL;
+const cattleCallaxios=axios.create({
+    baseURL: CATTLE_CALL_SERVER_URL
+  })
+cattleCallaxios.defaults.headers.post["Content-Type"] = "application/json";
 let rtcPeerConn={};
 class CattleCall extends Emitter{
     constructor(clientId, clientSecret) {
@@ -34,6 +38,7 @@ class CattleCall extends Emitter{
         this.connectionState="pending";
         this.screenScharetrackId=null;
         this.incomingScreenShare=null;
+        this.meetingType=1;
         //this.rtcPeerConn={};
         //this.connectionStatus="not-connected";
         $this = this;
@@ -173,6 +178,34 @@ class CattleCall extends Emitter{
             })
         });
     }
+    joinWebinar(meeting_id,password){
+        return new Promise(async(resolve,reject)=>{
+            if($this.connectionState!=="connected") return reject("invalid request, connection missing");
+            if(meeting_id=="" || meeting_id===undefined){
+                reject("meeting id requered")
+            }
+            let data={meeting_id:meeting_id,password:password};
+            $this.socket.emit("is_meeting_started",data,function(response){
+                if(!response.success && response.type===1){
+                    resolve(response);
+                }
+            })
+            $this.socket.emit("join_meeting",data,async function(response){
+                if(response.success){
+                    resolve(response);
+                    $this.active_meeting_id=meeting_id;
+                    let participents=response.data;
+                    await participents.forEach(items=>{
+                        if(items.host==1){
+                            console.log("sai");
+                            initWebinarWebRtc(items.user_id,items.user_id,true)
+                        }
+                    });
+                }
+                reject(response);
+            })
+        });
+    }
     toggleVideo(){
         if($this.connectionState!=="connected") return $this.emit("error","invalid request, connection missing");
         $this.videoStatus=$this.videoStatus?false:true;
@@ -251,6 +284,24 @@ class CattleCall extends Emitter{
         let data={'participant_id' : participentId,meeting_id:$this.active_meeting_id};
         $this.socket.emit("chnage_host",data);
     }
+    raiseHand(participentId){
+        if($this.connectionState!=="connected") return $this.emit("error","invalid request, connection missing");
+        if(!participentId){return $this.emit("error","participant id required");} 
+        let data={'participant_id' : participentId, meeting_id : $this.active_meeting_id, request_status:0};
+        $this.socket.emit("hand_raise",data);
+    }
+    acceptRequest(participentId){
+        if($this.connectionState!=="connected") return $this.emit("error","invalid request, connection missing");
+        if(!participentId){return $this.emit("error","participant id required");} 
+        let data={'participant_id' : participentId,meeting_id:$this.active_meeting_id,request_status:1};
+        $this.socket.emit("request_status",data);
+    }
+    rejectRequest(participentId){
+        if($this.connectionState!=="connected") return $this.emit("error","invalid request, connection missing");
+        if(!participentId){return $this.emit("error","participant id required");} 
+        let data={'participant_id' : participentId,meeting_id:$this.active_meeting_id,request_status:2};
+        $this.socket.emit("request_status",data);
+    }
     leaveMeeting(){
         if($this.connectionState!=="connected") return $this.emit("error","invalid request, connection missing");
         let data={'participant_id' : $this.videoLoginUserId,meeting_id:$this.active_meeting_id};
@@ -264,7 +315,7 @@ class CattleCall extends Emitter{
     }
     shareScreen(){
         getMediaStream(function(){
-            let data={meeting_id:$this.active_meeting_id,track_id:$this.screenScharetrackId,participant_id:$this.videoLoginUserId};
+            let data={meeting_id:$this.active_meeting_id,track_id:$this.screenScharetrackId,participant_id:$this.videoLoginUserId,type:1};
             $this.socket.emit("screen_share_track",data);
             addScreenShareStreem();
         })
@@ -272,8 +323,8 @@ class CattleCall extends Emitter{
 
    /** getDevices is used to get audio / video devices **/
 
-    getDevices(callback) {
-        navigator.mediaDevices.getUserMedia({audio:true})
+    async getDevices(callback) {
+        await navigator.mediaDevices.getUserMedia({audio:true})
         .then(function() {
            console.log("audio working");
         }).catch(function(err) { 
@@ -281,13 +332,15 @@ class CattleCall extends Emitter{
                 $this.audioStatus=false;
             }
          });
-        navigator.mediaDevices.getUserMedia({video:true})
+        await navigator.mediaDevices.getUserMedia({video:true})
         .then(function() {
            console.log("video working");
         }).catch(function(err) {  
             if(err.name==="NotFoundError"){
                 $this.videoStatus=false;
-            } 
+            }
+            console.log(err)
+            $this.videoStatus=false; 
         });
         var videoInputs = [];
         var audioInputs = [];
@@ -415,8 +468,18 @@ function listenSockets(){
         }
     })
     $this.socket.on("screen_share_track",data=>{
-        console.log(data,"screen share")
-        $this.incomingScreenShare=data.track_id;
+        if(data.type==1){
+            console.log(data,"screen share")
+            $this.incomingScreenShare=data.track_id;
+        }else if(data.type==0){
+            $this.emit('screen_share_stop',data.participant_id)
+        }
+    })
+    $this.socket.on("hand_raise",function(data){
+        $this.emit('hand_raise',data.participant_id)
+    })
+    $this.socket.on('request_status',function(data){
+        $this.emit('hand_status',data)
     })
 }
 function registerUser(data){
@@ -555,15 +618,19 @@ async function initVideoConferenceWebRtc(id,toId,negotiate){
         }
     };
     rtcPeerConn[id].ontrack = function (evt) {
-        if($this.incomingScreenShare){
+        if(1){
+            console.log(evt.streams[0]);
             evt.streams[0].getTracks().forEach(track=>{
+                console.log(track);
                 if(track.id== $this.incomingScreenShare){
                     return setScreenshareVideo(evt.streams[0],id);
+                }else{
+                    setConferenceVideo(evt.streams[0],id);
                 }
             });
-            return false;
+           // return false;
         }
-        setConferenceVideo(evt.streams[0],id);
+        
     };
     if($this.localVideoStream){
         addConferenceStream(id);
@@ -573,7 +640,206 @@ async function initVideoConferenceWebRtc(id,toId,negotiate){
         })
     }
 }
+async function initVideoConferenceWebRtcRemote(id,toId,negotiate){
+    if(rtcPeerConn[id]) return false;
+    rtcPeerConn[id] = new RTCPeerConnection($this.configurationConferenceVideocall);
+    rtcPeerConn[id].onicecandidate = function (evt) {
+        if (evt.candidate && $this.videoLoginUserId!=toId){
+            $this.socket.emit('video_conference_signal',{type:"candidate", candidate: evt.candidate,from :$this.videoLoginUserId,to : toId,meeting_id : $this.active_meeting_id});
+        }
+    };
+    rtcPeerConn[id].onnegotiationneeded = function () {
+        if(rtcPeerConn[id].signalingState != "stable"){
+            return;
+        }
+        if(typeof rtcPeerConn[id]._do_negotiate === "undefined") rtcPeerConn[id]._do_negotiate = true;
+        if(!rtcPeerConn[id]._do_negotiate){
+            rtcPeerConn[id]._do_negotiate = true;
+            return;
+        }
+        if(rtcPeerConn[id]._negotiating === true){
+            return;
+        }else{
+            rtcPeerConn[id]._negotiating = true;
+        }
+        rtcPeerConn[id].createOffer().then((desc)=>{
+            desc.sdp = handleOfferSdp(desc);
+            if(rtcPeerConn[id].signalingState != "stable"){
+                rtcPeerConn[id]._negotiating = false;
+                return;
+            }
+            rtcPeerConn[id].setLocalDescription(desc).then(()=> {
+                if($this.videoLoginUserId!=toId){
+                $this.socket.emit('video_conference_signal',{type:"offer", offer: rtcPeerConn[id].localDescription,from : $this.videoLoginUserId,to : toId,meeting_id : $this.active_meeting_id});
+                rtcPeerConn[id]._negotiating = false;
+                }
+            }).catch(error=>{
+                console.log("setLocalDescription error",error);
+                rtcPeerConn[id]._negotiating = false;
+            });
+        }).catch(e=>{
+            rtcPeerConn[id]._negotiating = false;
+        });
+    };
+    rtcPeerConn[id].onremovetrack=function(){
+        console.log("track removed");
+    };
+    rtcPeerConn[id].onopen = function () {
+        console.log("Connected");
+    };
+    rtcPeerConn[id].onerror = function (err) {
+        console.log("Got error", err);
+    };
+    rtcPeerConn[id].oniceconnectionstatechange = function() {
+        try{
+            if(rtcPeerConn[id].iceConnectionState == 'failed') {
+                if (rtcPeerConn[id].restartIce) {
+                    rtcPeerConn[id].restartIce();
+                  } else {
+                    const offerOptions = {offerToReceiveAudio: 1,offerToReceiveVideo: 1,iceRestart:true};
+                      rtcPeerConn[id].createOffer(offerOptions).then((desc)=>{
+                        desc.sdp = handleOfferSdp(desc);
+                        rtcPeerConn[id].setLocalDescription(desc).then(()=> {
+                            console.log(id,"-----failed connection id----------",toId);
+                            $this.socket.emit('video_conference_signal',{type:"offer", offer: rtcPeerConn[id].localDescription,from : videoLoginUserId,to : toId,meeting_id : meeting_id});
+                        }).catch(error=>{
+                            console.log("setLocalDescription error",error)
+                        });
+                    }).catch(err=>{
+                        console.log("offer error",err)
+                    });
+                  }
+            }else if(rtcPeerConn[id].iceConnectionState == 'connected'){
+                console.log("connected-----------",id);
+            }else if(rtcPeerConn[id].iceConnectionState == 'closed'){
+               console.log("closed----------",id);
+               $this.emit("disconnect",id);
+            }else if(rtcPeerConn[id].iceConnectionState == 'disconnected'){
+                console.log("disconnected------",id);
+                $this.emit("disconnect",id);
+            }else if(rtcPeerConn[id].iceConnectionState == 'new'){
+                console.log("new-----------")
+            }
+        }catch (e){
 
+        }
+    };
+    rtcPeerConn[id].ontrack = function (evt) {
+        if(1){
+            console.log(evt.streams[0]);
+            evt.streams[0].getTracks().forEach(track=>{
+                if(track.id== $this.incomingScreenShare){
+                    return setScreenshareVideo(evt.streams[0],id);
+                }else{
+                    setConferenceVideo(evt.streams[0],id);
+                }
+            });
+            //return false;
+        }
+       
+    };
+}
+async function initWebinarWebRtc(id,toId,negotiate){
+    if(rtcPeerConn[id]) return false;
+    rtcPeerConn[id] = new RTCPeerConnection($this.configurationConferenceVideocall);
+    rtcPeerConn[id].onicecandidate = function (evt) {
+        if (evt.candidate && $this.videoLoginUserId!=toId){
+            $this.socket.emit('video_conference_signal',{type:"candidate", candidate: evt.candidate,from :$this.videoLoginUserId,to : toId,meeting_id : $this.active_meeting_id});
+        }
+    };
+    rtcPeerConn[id].onnegotiationneeded = function () {
+        if(rtcPeerConn[id].signalingState != "stable"){
+            return;
+        }
+        if(typeof rtcPeerConn[id]._do_negotiate === "undefined") rtcPeerConn[id]._do_negotiate = true;
+        if(!rtcPeerConn[id]._do_negotiate){
+            rtcPeerConn[id]._do_negotiate = true;
+            return;
+        }
+        if(rtcPeerConn[id]._negotiating === true){
+            return;
+        }else{
+            rtcPeerConn[id]._negotiating = true;
+        }
+        rtcPeerConn[id].createOffer().then((desc)=>{
+            desc.sdp = handleOfferSdp(desc);
+            if(rtcPeerConn[id].signalingState != "stable"){
+                rtcPeerConn[id]._negotiating = false;
+                return;
+            }
+            rtcPeerConn[id].setLocalDescription(desc).then(()=> {
+                if($this.videoLoginUserId!=toId){
+                $this.socket.emit('video_conference_signal',{type:"offer", offer: rtcPeerConn[id].localDescription,from : $this.videoLoginUserId,to : toId,meeting_id : $this.active_meeting_id});
+                rtcPeerConn[id]._negotiating = false;
+                }
+            }).catch(error=>{
+                console.log("setLocalDescription error",error);
+                rtcPeerConn[id]._negotiating = false;
+            });
+        }).catch(e=>{
+            rtcPeerConn[id]._negotiating = false;
+        });
+    };
+    rtcPeerConn[id].onremovetrack=function(){
+        console.log("track removed");
+    };
+    rtcPeerConn[id].onopen = function () {
+        console.log("Connected");
+    };
+    rtcPeerConn[id].onerror = function (err) {
+        console.log("Got error", err);
+    };
+    rtcPeerConn[id].oniceconnectionstatechange = function() {
+        try{
+            if(rtcPeerConn[id].iceConnectionState == 'failed') {
+                if (rtcPeerConn[id].restartIce) {
+                    rtcPeerConn[id].restartIce();
+                  } else {
+                    const offerOptions = {offerToReceiveAudio: 1,offerToReceiveVideo: 1,iceRestart:true};
+                      rtcPeerConn[id].createOffer(offerOptions).then((desc)=>{
+                        desc.sdp = handleOfferSdp(desc);
+                        rtcPeerConn[id].setLocalDescription(desc).then(()=> {
+                            console.log(id,"-----failed connection id----------",toId);
+                            $this.socket.emit('video_conference_signal',{type:"offer", offer: rtcPeerConn[id].localDescription,from : videoLoginUserId,to : toId,meeting_id : meeting_id});
+                        }).catch(error=>{
+                            console.log("setLocalDescription error",error)
+                        });
+                    }).catch(err=>{
+                        console.log("offer error",err)
+                    });
+                  }
+            }else if(rtcPeerConn[id].iceConnectionState == 'connected'){
+                console.log("connected-----------",id);
+            }else if(rtcPeerConn[id].iceConnectionState == 'closed'){
+               console.log("closed----------",id);
+               $this.emit("disconnect",id);
+            }else if(rtcPeerConn[id].iceConnectionState == 'disconnected'){
+                console.log("disconnected------",id);
+                $this.emit("disconnect",id);
+            }else if(rtcPeerConn[id].iceConnectionState == 'new'){
+                console.log("new-----------")
+            }
+        }catch (e){
+
+        }
+    };
+    rtcPeerConn[id].ontrack = function (evt) {
+        console.log(evt,"incoming")
+        if(1){
+            evt.streams[0].getTracks().forEach(track=>{
+                if(track.id== $this.incomingScreenShare){
+                    return setScreenshareVideo(evt.streams[0],id);
+                }else{
+                    setConferenceVideo(evt.streams[0],id);
+                }
+            });
+            //return false;
+        }
+    };
+    $this.localVideoStream = blackSilence({width: 140, height: 100}) // parameter is optional
+    //$this.localVideoStream.addTrack();
+    addConferenceStream(id);
+}
 function setConferenceVideo(stream,id){
     let options={}
         speechEvents[id] = hark(stream, options);
@@ -587,15 +853,43 @@ function setConferenceVideo(stream,id){
 }
 
 function addConferenceStream(id){
+    console.log($this.localVideoStream,"track");
+    if(!$this.localVideoStream){ return false;}
     if(typeof rtcPeerConn[id] != "undefined"){
-        $this.localVideoStream.getTracks().forEach(track => rtcPeerConn[id].addTrack(track, $this.localVideoStream));
+        $this.localVideoStream.getTracks().forEach(track =>{
+            var sender = rtcPeerConn[id].getSenders().find(function(s) {
+                return (s.track)?s.track.kind == track.kind:null;
+              });
+              if(sender){
+                return;
+              };
+            rtcPeerConn[id].addTrack(track, $this.localVideoStream);
+        });
+        if($this.localScreenStream!=null && $this.screenScharetrackId){
+            console.log("screeeeeee")
+            let data={meeting_id:$this.active_meeting_id,track_id:$this.screenScharetrackId,participant_id:$this.videoLoginUserId,type:1};
+            $this.socket.emit("screen_share_track",data);
+            setTimeout(() => {
+                $this.localScreenStream.getTracks().forEach(track => {
+                    rtcPeerConn[id].addTrack(track,$this.localScreenStream);
+                });
+            }, 1500);
+        }
     }
 }
 function addScreenShareStreem(){
     for(let connection in rtcPeerConn ){
         $this.localScreenStream.getTracks().forEach(track => {
-            rtcPeerConn[connection].addTrack(track,$this.localScreenStream)
+            rtcPeerConn[connection].addTrack(track,$this.localScreenStream);
         });
+    }
+}
+function stopScreenSharing(){
+    if($this.localScreenStream){
+        let data={meeting_id:$this.active_meeting_id,track_id:$this.screenScharetrackId,participant_id:$this.videoLoginUserId,type:0};
+        $this.socket.emit("screen_share_track",data);
+        $this.localScreenStream=null;
+        $this.screenScharetrackId=null;
     }
 }
 function setScreenshareVideo(stream,id){
@@ -618,11 +912,15 @@ function removeConferenceStream(id){
 }
 function removeParticipant(id){
     if(typeof rtcPeerConn[id] != "undefined" && rtcPeerConn[id] != null){
-        let track=$this.localVideoStream.getTracks()[0];
-        var sender = rtcPeerConn[id].getSenders().find(function(s) {
-            return s.track.kind == track.kind;
-          });
-        rtcPeerConn[id].removeTrack(sender);
+        if($this.localVideoStream){
+            let track=$this.localVideoStream.getTracks()[0];
+            var sender = rtcPeerConn[id].getSenders().find(function(s) {
+                return (s.track)?s.track.kind == track.kind:null;
+            });
+            if(sender){
+                rtcPeerConn[id].removeTrack(sender);
+            }
+        }
         rtcPeerConn[id].close();
         rtcPeerConn[id]=null;
     }
@@ -640,15 +938,20 @@ function endConference(){
     $this.localVideoStream=null;
 }
 
-function onVideoConferenceOffer(offer,id,toId) {
+async function onVideoConferenceOffer(offer,id,toId) {
     console.log("offer step 1","test log");
     if(!rtcPeerConn[id]){
-        initVideoConferenceWebRtc(id,toId,true);
-        return;
+        initVideoConferenceWebRtcRemote(id,toId,true);
+        //return;
     }else if(typeof rtcPeerConn[id] !== "undefined"){
-        console.log("localoffer")
-    } 
+        console.log("localoffer",rtcPeerConn[id].signalingState)
+    }
+    if(rtcPeerConn[id].signalingState!=="stable"){
+       await rtcPeerConn[id].setLocalDescription({type: "rollback",spd:""})
+    }
+    console.log("localoffer",id,rtcPeerConn[id].signalingState); 
     rtcPeerConn[id].setRemoteDescription(new RTCSessionDescription(offer)).then(()=>{
+        addConferenceStream(id);
         rtcPeerConn[id].createAnswer().then(function(answer){
             rtcPeerConn[id].setLocalDescription(answer).catch(error=>{
                 console.log(error);
@@ -668,12 +971,15 @@ function onVideoConferenceAnswer(answer,id,toId) {
         initVideoConferenceWebRtc(id,toId,false);
         return;
     }
+    console.log("remote answer");
     if(rtcPeerConn[id].signalingState === "have-local-offer"){
         rtcPeerConn[id].setRemoteDescription(new RTCSessionDescription(answer));
+        console.log("remote answer 2222");
     }else if(rtcPeerConn[id].signalingState === "stable"){
         setTimeout(function(){
             initVideoConferenceWebRtc(id,toId,false);
         },500);
+        console.log("remote answer111");
     }
 }
 
@@ -693,6 +999,10 @@ function onVideoConferenceCandidate(candidate,id,toId) {
 
 function addStream(callback,streamtype=""){
     // get a local stream, show it in our video tag and add it to be sent
+    if($this.videoStatus==false && $this.audioStatus==false){
+        callback(false);
+        return;
+    }
     if($this.localVideoStream != null){
         $this.localVideoStream.stop();
     }
@@ -705,6 +1015,7 @@ function addStream(callback,streamtype=""){
     if (navigator.mediaDevices.getSupportedConstraints().noiseSuppression){
         noiseSuppression=true;
     }
+    console.log(adapter.default.browserDetails.browser);
     if (navigator.mediaDevices.getSupportedConstraints().height) {
         videoConstraints.height= { min: 180, ideal: 480, max:720 };
     }
@@ -719,11 +1030,16 @@ function addStream(callback,streamtype=""){
     }
     if($this.videoSource){
         videoConstraints.deviceId=$this.videoSource;
-    }   
+    }
+    if(adapter.default.browserDetails.browser=="safari"){
+       // $this.videoStatus=false; 
+    }
     const constraints = {
         audio: $this.audioStatus?{deviceId: $this.audioSource ? $this.audioSource : "default",echoCancellation:echoCancellation,noiseSuppression:noiseSuppression}:$this.audioStatus,
         video: $this.videoStatus?videoConstraints:$this.videoStatus
       };
+      console.log(constraints);
+      console.log($this.videoStatus);
     navigator.mediaDevices.getUserMedia(constraints).then(stream => {
         $this.localVideoStream = stream;
         $this.localVideoStream.stop = function () {
@@ -750,6 +1066,9 @@ function getMediaStream(callback){
     const constraints = {};
     navigator.mediaDevices.getDisplayMedia(constraints).then(stream => {
         $this.localScreenStream = stream;
+        stream.getVideoTracks()[0].onended = function () {
+            stopScreenSharing();
+        };
         stream.getTracks().forEach(track => $this.screenScharetrackId=track.id);
          if(callback){
             callback(stream);
@@ -775,19 +1094,36 @@ function handleOfferSdp(offer) {
     }
     for(let i = 0; i < sdp.length; i++) {
         if(sdp[i].match(/m=video/)) {//modify and add the new lines for video
-            new_sdp += sdp[i] + '\r\n' + 'b=AS:' + '128' + '\r\n';
+            new_sdp += sdp[i] + '\r\n' + 'b=AS:' + '256' + '\r\n';
         }
-        else {
-            if(sdp[i].match(/m=audio/)) { //modify and add the new lines for audio
-                new_sdp += sdp[i] + '\r\n' + 'b=AS:' + 64 + '\r\n';
-            }
-            else {
-                new_sdp += sdp[i] + '\r\n';
-            }
+        else if(sdp[i].match(/m=audio/)) 
+        { //modify and add the new lines for audio
+            new_sdp += sdp[i] + '\r\n' + 'b=AS:' + 64 + '\r\n';
+        }
+        else{
+            new_sdp += sdp[i] + '\r\n';
         }
     }
     return new_sdp; //return the new sdp
 }
+let silence = () => {
+    let ctx = new AudioContext(), oscillator = ctx.createOscillator();
+    let dst = oscillator.connect(ctx.createMediaStreamDestination());
+    oscillator.start();
+    return Object.assign(dst.stream.getAudioTracks()[0], {enabled: false});
+  }
+  let black = ({width = 100, height = 50} = {}) => {
+    let canvas = Object.assign(document.createElement("canvas"), {width, height});
+    canvas.getContext('2d').fillRect(0, 0, width, height);
+    let stream = canvas.captureStream();
+    return Object.assign(stream.getVideoTracks()[0], {enabled: false});
+  }
+  let blackSilence = (...args) => new MediaStream([black(...args), silence()]);
+  window.onbeforeunload = function (evt) {
+    if($this.connectionState!=="connected") return;
+    let data={'participant_id' : $this.videoLoginUserId,meeting_id:$this.active_meeting_id};
+    $this.socket.emit("leave_meeting",data); 
+  }
 module.exports = CattleCall;
 global.CattleCall = CattleCall;
 window.CattleCall=CattleCall;
