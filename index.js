@@ -9,7 +9,6 @@ let Emitter = require("events").EventEmitter;
 let $this={};
 let speechEvents={};
 const axios = require("axios").default;
-//cattleCallaxios.defaults.baseURL= CATTLE_CALL_SERVER_URL;
 const cattleCallaxios=axios.create({
     baseURL: CATTLE_CALL_SERVER_URL
   })
@@ -322,7 +321,6 @@ class CattleCall extends Emitter{
     }
 
    /** getDevices is used to get audio / video devices **/
-
     async getDevices(callback) {
         await navigator.mediaDevices.getUserMedia({audio:true})
         .then(function() {
@@ -526,13 +524,6 @@ function createMeeting(meeting_id,password,user_id){
     })
 }
 
-function getServers(){
-    let data={};
-    $this.socket.emit('configuration',data,function(data){
-        $this.configurationConferenceVideocall=data;
-    })
-}
-
 async function initVideoConferenceWebRtc(id,toId,negotiate){
     if(rtcPeerConn[id]) return false;
     rtcPeerConn[id] = new RTCPeerConnection($this.configurationConferenceVideocall);
@@ -618,19 +609,13 @@ async function initVideoConferenceWebRtc(id,toId,negotiate){
         }
     };
     rtcPeerConn[id].ontrack = function (evt) {
-        if(1){
-            console.log(evt.streams[0]);
             evt.streams[0].getTracks().forEach(track=>{
-                console.log(track);
                 if(track.id== $this.incomingScreenShare){
                     return setScreenshareVideo(evt.streams[0],id);
                 }else{
                     setConferenceVideo(evt.streams[0],id);
                 }
             });
-           // return false;
-        }
-        
     };
     if($this.localVideoStream){
         addConferenceStream(id);
@@ -824,8 +809,6 @@ async function initWebinarWebRtc(id,toId,negotiate){
         }
     };
     rtcPeerConn[id].ontrack = function (evt) {
-        console.log(evt,"incoming")
-        if(1){
             evt.streams[0].getTracks().forEach(track=>{
                 if(track.id== $this.incomingScreenShare){
                     return setScreenshareVideo(evt.streams[0],id);
@@ -833,10 +816,11 @@ async function initWebinarWebRtc(id,toId,negotiate){
                     setConferenceVideo(evt.streams[0],id);
                 }
             });
-            //return false;
-        }
     };
-    $this.localVideoStream = blackSilence({width: 140, height: 100}) // parameter is optional
+    $this.localVideoStream = blackSilence({width: 140, height: 100}); // parameter is optional
+    $this.localVideoStream.stop = function () {
+       console.log("local");
+    };
     //$this.localVideoStream.addTrack();
     addConferenceStream(id);
 }
@@ -937,7 +921,6 @@ function endConference(){
     if($this.localVideoStream)$this.localVideoStream.stop();
     $this.localVideoStream=null;
 }
-
 async function onVideoConferenceOffer(offer,id,toId) {
     console.log("offer step 1","test log");
     if(!rtcPeerConn[id]){
@@ -964,8 +947,6 @@ async function onVideoConferenceOffer(offer,id,toId) {
         console.log(err,"error seting remote description");
     })
 }
-
-
 function onVideoConferenceAnswer(answer,id,toId) {
     if(!rtcPeerConn[id]){
         initVideoConferenceWebRtc(id,toId,false);
@@ -982,7 +963,6 @@ function onVideoConferenceAnswer(answer,id,toId) {
         console.log("remote answer111");
     }
 }
-
 function onVideoConferenceCandidate(candidate,id,toId) {
     if(!rtcPeerConn[id]){
         initVideoConferenceWebRtc(id,toId,false);
@@ -1015,7 +995,6 @@ function addStream(callback,streamtype=""){
     if (navigator.mediaDevices.getSupportedConstraints().noiseSuppression){
         noiseSuppression=true;
     }
-    console.log(adapter.default.browserDetails.browser);
     if (navigator.mediaDevices.getSupportedConstraints().height) {
         videoConstraints.height= { min: 180, ideal: 480, max:720 };
     }
@@ -1038,8 +1017,6 @@ function addStream(callback,streamtype=""){
         audio: $this.audioStatus?{deviceId: $this.audioSource ? $this.audioSource : "default",echoCancellation:echoCancellation,noiseSuppression:noiseSuppression}:$this.audioStatus,
         video: $this.videoStatus?videoConstraints:$this.videoStatus
       };
-      console.log(constraints);
-      console.log($this.videoStatus);
     navigator.mediaDevices.getUserMedia(constraints).then(stream => {
         $this.localVideoStream = stream;
         $this.localVideoStream.stop = function () {
