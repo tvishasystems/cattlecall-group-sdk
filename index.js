@@ -3,12 +3,13 @@ const trim = require("trim");
 const adapter=require('webrtc-adapter');
 const socketClient=require("socket.io-client");
 const hark = require('hark');
-const CATTLE_CALL_SERVER_URL="https://cattlecall.azurewebsites.net";
-//const CATTLE_CALL_SERVER_URL="http://192.168.225.21:8080";
+//const CATTLE_CALL_SERVER_URL="https://cattlecall.azurewebsites.net";
+const CATTLE_CALL_SERVER_URL="http://192.168.225.21:8080";
 let Emitter = require("events").EventEmitter;
 let $this={};
 let speechEvents={};
 const axios = require("axios").default;
+//cattleCallaxios.defaults.baseURL= CATTLE_CALL_SERVER_URL;
 const cattleCallaxios=axios.create({
     baseURL: CATTLE_CALL_SERVER_URL
   })
@@ -316,7 +317,9 @@ class CattleCall extends Emitter{
         getMediaStream(function(){
             let data={meeting_id:$this.active_meeting_id,track_id:$this.screenScharetrackId,participant_id:$this.videoLoginUserId,type:1};
             $this.socket.emit("screen_share_track",data);
-            addScreenShareStreem();
+            setTimeout(function(){
+                addScreenShareStreem();
+            },1500)
         })
     }
 
@@ -863,9 +866,11 @@ function addConferenceStream(id){
 }
 function addScreenShareStreem(){
     for(let connection in rtcPeerConn ){
-        $this.localScreenStream.getTracks().forEach(track => {
-            rtcPeerConn[connection].addTrack(track,$this.localScreenStream);
-        });
+        if(rtcPeerConn[connection]){
+            $this.localScreenStream.getTracks().forEach(track => {
+                rtcPeerConn[connection].addTrack(track,$this.localScreenStream);
+            });
+        }
     }
 }
 function stopScreenSharing(){
