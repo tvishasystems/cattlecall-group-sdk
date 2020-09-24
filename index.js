@@ -613,7 +613,7 @@ async function initVideoConferenceWebRtc(id, toId, negotiate) {
     };
     rtcPeerConn[id].ontrack = function (evt) {
         let screenshare = false;
-        if (!evt.streams[0].getAudioTracks().length === 0) {
+        if (evt.streams[0].getAudioTracks().length === 0) {
             screenshare = true;
         }
         evt.streams[0].getTracks().forEach(track => {
@@ -718,7 +718,7 @@ async function initVideoConferenceWebRtcRemote(id, toId, negotiate) {
     };
     rtcPeerConn[id].ontrack = function (evt) {
         let screenshare = false;
-        if (!evt.streams[0].getAudioTracks().length === 0) {
+        if (evt.streams[0].getAudioTracks().length === 0) {
             screenshare = true;
         }
         evt.streams[0].getTracks().forEach(track => {
@@ -817,7 +817,7 @@ async function initWebinarWebRtc(id, toId, negotiate) {
     };
     rtcPeerConn[id].ontrack = function (evt) {
         let screenshare = false;
-        if (!evt.streams[0].getAudioTracks().length === 0) {
+        if (evt.streams[0].getAudioTracks().length === 0) {
             screenshare = true;
         }
         evt.streams[0].getTracks().forEach(track => {
