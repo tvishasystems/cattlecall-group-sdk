@@ -957,7 +957,7 @@ async function onVideoConferenceOffer(offer, id, toId) {
         await rtcPeerConn[id].setLocalDescription({ type: "rollback", spd: "" })
     }
     console.log("localoffer", id, rtcPeerConn[id].signalingState);
-    rtcPeerConn[id].setRemoteDescription(new RTCSessionDescription(offer)).then(() => {
+    rtcPeerConn[id].setRemoteDescription(new RTCSessionDescription(offer)).then(async () => {
         await addConferenceStream(id);
         rtcPeerConn[id].createAnswer().then(function (answer) {
             rtcPeerConn[id].setLocalDescription(answer).catch(error => {
