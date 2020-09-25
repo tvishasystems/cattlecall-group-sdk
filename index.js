@@ -297,6 +297,11 @@ class CattleCall extends Emitter {
         let data = { 'participant_id': participentId, meeting_id: $this.active_meeting_id, request_status: 1 };
         $this.socket.emit("request_status", data);
     }
+    meetingCommunication(data) {
+        if ($this.connectionState !== "connected") return $this.emit("error", "invalid request, connection missing");
+        let dataTosend = { meeting_id: $this.active_meeting_id, data: data };
+        $this.socket.emit("meeting_chanel", dataTosend);
+    }
     rejectRequest(participentId) {
         if ($this.connectionState !== "connected") return $this.emit("error", "invalid request, connection missing");
         if (!participentId) { return $this.emit("error", "participant id required"); }
@@ -489,6 +494,9 @@ function listenSockets() {
     })
     $this.socket.on('request_status', function (data) {
         $this.emit('hand_status', data)
+    })
+    $this.socket.on('meeting_chanel', function (data) {
+        $this.emit('meeting_communication', data.data)
     })
 }
 function registerUser(data) {
