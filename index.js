@@ -38,7 +38,7 @@ class CattleCall extends Emitter {
         this.connectionState = "pending";
         this.screenScharetrackId = null;
         this.incomingScreenShare = null;
-        this.meetingType = 1;
+        this.isWebinar = false;
         //this.rtcPeerConn={};
         //this.connectionStatus="not-connected";
         $this = this;
@@ -197,7 +197,8 @@ class CattleCall extends Emitter {
                     let participents = response.data;
                     await participents.forEach(items => {
                         if (items.host == 1) {
-                            console.log("sai");
+                            console.log("wertc init");
+                            $this.isWebinar = true;
                             initWebinarWebRtc(items.user_id, items.user_id, true)
                         }
                     });
@@ -321,6 +322,13 @@ class CattleCall extends Emitter {
                 addScreenShareStreem();
             }, 1500)
         })
+    }
+    stopScreenShare() {
+        if ($this.localScreenStream) {
+            $this.localScreenStream.getTracks().forEach(track => track.stop())
+            stopScreenSharing();
+        }
+
     }
 
     /** getDevices is used to get audio / video devices **/
@@ -847,29 +855,28 @@ function setConferenceVideo(stream, id) {
     $this.emit("user_stream_added", stream, id);
 }
 
-function addConferenceStream(id) {
-    console.log($this.localVideoStream, "track");
+async function addConferenceStream(id) {
     if (!$this.localVideoStream) { return false; }
     if (typeof rtcPeerConn[id] != "undefined") {
-        $this.localVideoStream.getTracks().forEach(track => {
+        await $this.localVideoStream.getTracks().forEach(track => {
             var sender = rtcPeerConn[id].getSenders().find(function (s) {
                 return (s.track) ? s.track.kind == track.kind : null;
             });
             if (sender) {
                 return;
-            };
-            rtcPeerConn[id].addTrack(track, $this.localVideoStream);
+            } else {
+                rtcPeerConn[id].addTrack(track, $this.localVideoStream);
+            }
         });
-        if ($this.localScreenStream != null && $this.screenScharetrackId) {
-            console.log("screeeeeee")
-            let data = { meeting_id: $this.active_meeting_id, track_id: $this.screenScharetrackId, participant_id: $this.videoLoginUserId, type: 1 };
-            $this.socket.emit("screen_share_track", data);
-            setTimeout(() => {
-                $this.localScreenStream.getTracks().forEach(track => {
+        setTimeout(function () {
+            if ($this.localScreenStream != null && $this.screenScharetrackId) {
+                let data = { meeting_id: $this.active_meeting_id, track_id: $this.screenScharetrackId, participant_id: $this.videoLoginUserId, type: 1 };
+                $this.socket.emit("screen_share_track", data);
+                await $this.localScreenStream.getTracks().forEach(track => {
                     rtcPeerConn[id].addTrack(track, $this.localScreenStream);
                 });
-            }, 1500);
-        }
+            }
+        }, 1500);
     }
 }
 function addScreenShareStreem() {
@@ -936,8 +943,12 @@ function endConference() {
 }
 async function onVideoConferenceOffer(offer, id, toId) {
     console.log("offer step 1", "test log");
-    if (!rtcPeerConn[id]) {
+    if (!rtcPeerConn[id] && $this.isWebinar == false) {
         initVideoConferenceWebRtcRemote(id, toId, true);
+        //return;
+    }
+    if (!rtcPeerConn[id] && $this.isWebinar == true) {
+        initWebinarWebRtc(id, toId, true);
         //return;
     } else if (typeof rtcPeerConn[id] !== "undefined") {
         console.log("localoffer", rtcPeerConn[id].signalingState)
@@ -947,7 +958,7 @@ async function onVideoConferenceOffer(offer, id, toId) {
     }
     console.log("localoffer", id, rtcPeerConn[id].signalingState);
     rtcPeerConn[id].setRemoteDescription(new RTCSessionDescription(offer)).then(() => {
-        addConferenceStream(id);
+        await addConferenceStream(id);
         rtcPeerConn[id].createAnswer().then(function (answer) {
             rtcPeerConn[id].setLocalDescription(answer).catch(error => {
                 console.log(error);
